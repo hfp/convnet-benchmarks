@@ -10,6 +10,17 @@ py_binary(
 )
 
 py_binary(
+    name = "benchmark_alexnetx",
+    srcs = [
+        "benchmark_alexnetx.py",
+    ],
+    srcs_version = "PY2AND3",
+    deps = [
+        "//tensorflow:tensorflow_py",
+    ],
+)
+
+py_binary(
     name = "benchmark_overfeat",
     srcs = [
         "benchmark_overfeat.py",
@@ -35,6 +46,17 @@ py_binary(
     name = "benchmark_googlenet",
     srcs = [
         "benchmark_googlenet.py",
+    ],
+    srcs_version = "PY2AND3",
+    deps = [
+        "//tensorflow:tensorflow_py",
+    ],
+)
+
+py_binary(
+    name = "benchmark_googlenetx",
+    srcs = [
+        "benchmark_googlenetx.py",
     ],
     srcs_version = "PY2AND3",
     deps = [

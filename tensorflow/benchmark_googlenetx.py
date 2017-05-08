@@ -28,7 +28,6 @@ tf.app.flags.DEFINE_string('csv_file', '',
                            not be cteated.
                            """)
 
-
 parameters = []
 
 conv_counter = 1
@@ -77,7 +76,7 @@ def _affine(inpOp, nIn, nOut):
         parameters += [kernel, biases]
         return affine1
 
-def _mpool(inpOp, kH, kW, dH, dW):
+def _mpool(inpOp, kH, kW, dH, dW, padding):
     global pool_counter
     global parameters
     name = 'pool' + str(pool_counter)
@@ -91,9 +90,47 @@ def _mpool(inpOp, kH, kW, dH, dW):
     return tf.nn.max_pool(inpOp,
                           ksize=ksize,
                           strides=strides,
-                          padding='VALID',
+                          padding=padding,
                           data_format=FLAGS.data_format,
                           name=name)
+
+def _apool(inpOp, kH, kW, dH, dW, padding):
+    global pool_counter
+    global parameters
+    name = 'pool' + str(pool_counter)
+    pool_counter += 1
+    if FLAGS.data_format == 'NCHW':
+      ksize = [1, 1, kH, kW]
+      strides = [1, 1, dH, dW]
+    else:
+      ksize = [1, kH, kW, 1]
+      strides = [1, dH, dW, 1]
+    return tf.nn.avg_pool(inpOp,
+                          ksize=ksize,
+                          strides=strides,
+                          padding=padding,
+                          data_format=FLAGS.data_format,
+                          name=name)
+
+def _inception(inp, inSize, o1s, o2s1, o2s2, o3s1, o3s2, o4s1, o4s2):
+    conv1 = _conv(inp, inSize, o1s, 1, 1, 1, 1, 'SAME')
+
+    conv3_ = _conv(inp, inSize, o2s1, 1, 1, 1, 1, 'SAME')
+    conv3 = _conv(conv3_, o2s1, o2s2, 3, 3, 1, 1, 'SAME')
+
+    conv5_ = _conv(inp, inSize, o3s1, 1, 1, 1, 1, 'SAME')
+    conv5 = _conv(conv5_, o3s1, o3s2, 5, 5, 1, 1, 'SAME')
+
+    pool_ = _mpool(inp, o4s1, o4s1, 1, 1, 'SAME')
+    pool = _conv(pool_, inSize, o4s2, 1, 1, 1, 1, 'SAME')
+
+    if FLAGS.data_format == 'NCHW':
+      channel_dim = 1
+    else:
+      channel_dim = 3
+    incept = tf.concat([conv1, conv3, conv5, pool], channel_dim)
+    return incept
+
 
 def loss(logits, labels):
     batch_size = tf.size(labels)
@@ -108,20 +145,29 @@ def loss(logits, labels):
     return loss
 
 def inference(images):
-    conv1 = _conv (images, 3, 64, 11, 11, 4, 4, 'VALID')
-    pool1 = _mpool(conv1,  3, 3, 2, 2)
-    conv2 = _conv (pool1,  64, 192, 5, 5, 1, 1, 'SAME')
-    pool2 = _mpool(conv2,  3, 3, 2, 2)
-    conv3 = _conv (pool2,  192, 384, 3, 3, 1, 1, 'SAME')
-    conv4 = _conv (conv3,  384, 256, 3, 3, 1, 1, 'SAME')
-    conv5 = _conv (conv4,  256, 256, 3, 3, 1, 1, 'SAME')
-    pool5 = _mpool(conv5,  3, 3, 2, 2)
-    resh1 = tf.reshape(pool5, [-1, 256 * 6 * 6])
-    affn1 = _affine(resh1, 256 * 6 * 6, 4096)
-    affn2 = _affine(affn1, 4096, 4096)
-    affn3 = _affine(affn2, 4096, 1000)
+    conv1 = _conv (images, 3, 64, 7, 7, 2, 2, 'SAME')
+    pool1 = _mpool(conv1,  3, 3, 2, 2, 'SAME')
+    conv2 = _conv (pool1,  64, 64, 1, 1, 1, 1, 'SAME')
+    conv3 = _conv (conv2,  64, 192, 3, 3, 1, 1, 'SAME')
+    pool3 = _mpool(conv3,  3, 3, 2, 2, 'SAME')
 
-    return affn3
+    incept3a = _inception(pool3,    192, 64, 96, 128, 16, 32, 3, 32)
+    incept3b = _inception(incept3a, 256, 128, 128, 192, 32, 96, 3, 64)
+    pool4 = _mpool(incept3b,  3, 3, 2, 2, 'SAME')
+    incept4a = _inception(pool4,    480, 192,  96, 208, 16, 48, 3, 64)
+    incept4b = _inception(incept4a, 512, 160, 112, 224, 32, 64, 3, 64)
+    incept4c = _inception(incept4b, 512, 128, 128, 256, 32, 64, 3, 64)
+    incept4d = _inception(incept4c, 512, 112, 144, 288, 32, 64, 3, 64)
+    incept4e = _inception(incept4d, 528, 256, 160, 320, 32, 128, 3, 128)
+    pool5 = _mpool(incept4e,  3, 3, 2, 2, 'SAME')
+    incept5a = _inception(pool5,    832, 256, 160, 320, 32, 128, 3, 128)
+    incept5b = _inception(incept5a, 832, 384, 192, 384, 48, 128, 3, 128)
+    pool6 = _apool(incept5b,  7, 7, 1, 1, 'VALID')
+
+    resh1 = tf.reshape(pool6, [-1, 1024])
+    affn1 = _affine(resh1, 1024, 1000)
+
+    return affn1
 
 
 def time_tensorflow_run(session, target, info_string):
@@ -162,13 +208,10 @@ def run_benchmark():
   with tf.Graph().as_default():
     # Generate some dummy images.
     image_size = 224
-    # Note that our padding definition is slightly different the cuda-convnet.
-    # In order to force the model to start with the same activations sizes,
-    # we add 3 to the image_size and employ VALID padding above.
     if FLAGS.data_format == 'NCHW':
-      image_shape = [FLAGS.batch_size, 3, image_size + 3, image_size + 3]
+      image_shape = [FLAGS.batch_size, 3, image_size, image_size]
     else:
-      image_shape = [FLAGS.batch_size, image_size + 3, image_size + 3, 3]
+      image_shape = [FLAGS.batch_size, image_size, image_size, 3]
     images = tf.Variable(tf.random_normal(image_shape,
                                           dtype=tf.float32,
                                           stddev=1e-1))
