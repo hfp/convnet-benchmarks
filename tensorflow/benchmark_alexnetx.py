@@ -180,7 +180,12 @@ def run_benchmark():
     init = tf.global_variables_initializer()
 
     # Start running operations on the Graph.
-    sess = tf.Session('')
+    sess = tf.Session(
+        config=tf.ConfigProto(
+            inter_op_parallelism_threads=1,
+            intra_op_parallelism_threads=48
+        )
+    )
     sess.run(init)
 
     run_forward = True
